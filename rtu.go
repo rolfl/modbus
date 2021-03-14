@@ -55,7 +55,7 @@ type rtu struct {
 }
 
 // NewRTU establishes a connection to a local COM port (windows) or serial device (others)
-func NewRTU(device string, baud int, parity byte, stopbits byte, dtr bool) (Modbus, error) {
+func NewRTU(device string, baud int, parity int, stopbits int, dtr bool) (Modbus, error) {
 	options := serial.Config{}
 	options.Name = device
 	options.Baud = baud
@@ -70,7 +70,7 @@ func NewRTU(device string, baud int, parity byte, stopbits byte, dtr bool) (Modb
 	case 'O':
 		options.Parity = serial.ParityOdd
 	default:
-		return nil, fmt.Errorf("Illegal parity %c", parity)
+		return nil, fmt.Errorf("illegal parity %c", parity)
 	}
 	switch stopbits {
 	case 1:
@@ -78,7 +78,7 @@ func NewRTU(device string, baud int, parity byte, stopbits byte, dtr bool) (Modb
 	case 2:
 		options.StopBits = serial.Stop2
 	default:
-		return nil, fmt.Errorf("Illegal stop bits %v", stopbits)
+		return nil, fmt.Errorf("illegal stop bits %v", stopbits)
 	}
 
 	options.ReadTimeout = time.Millisecond
@@ -100,10 +100,10 @@ func NewRTU(device string, baud int, parity byte, stopbits byte, dtr bool) (Modb
 	wp.name = device
 	wp.serial = port
 	wp.isopen = true
-	wp.closed = make(chan bool, 0)
+	wp.closed = make(chan bool)
 	wp.rxchar = make(chan byte, 300)
-	wp.rxto = make(chan bool, 0)
-	wp.rxtoc = make(chan bool, 0)
+	wp.rxto = make(chan bool)
+	wp.rxtoc = make(chan bool)
 	wp.txready = make(chan bool, 1)
 	wp.toTX = make(chan adu, 5)
 	wp.toDemux = make(chan adu, 5)
