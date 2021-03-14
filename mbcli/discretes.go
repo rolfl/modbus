@@ -1,7 +1,7 @@
 package main
 
 type DiscreteGetCommands struct {
-	Units   []string `short:"u" long:"unit" description:"Unit(s) to contact" required:"true"`
+	Units   []string `short:"u" long:"unit" description:"Unit(s) to contact" required:"true" env:"MBCLI_UNIT" env-delim:","`
 	Timeout int      `short:"t" long:"timeout" default:"5" description:"Timeout (in seconds)"`
 	Args    struct {
 		Addresses []string `required:"1"`

@@ -14,7 +14,7 @@ type DiagnosticCommands struct {
 	Events   bool     `short:"e" long:"events" description:"Return the Event counter value"`
 	Clear    bool     `short:"C" long:"clear" description:"Reset the Event counter value"`
 	Timeout  int      `short:"t" long:"timeout" default:"5" description:"Timeout (in seconds)"`
-	Units    []string `short:"u" long:"unit" description:"Unit(s) to contatc" required:"true"`
+	Units    []string `short:"u" long:"unit" description:"Unit(s) to contact" required:"true" env:"MBCLI_UNIT" env-delim:","`
 }
 
 func (c *DiagnosticCommands) Execute(args []string) error {

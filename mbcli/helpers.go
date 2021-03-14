@@ -85,7 +85,10 @@ func initializeConnections(units []string) error {
 
 func genericClientReads(toget string, units []string, addressRefs []string, timeoutSec int) error {
 	// initialize the connections
-	initializeConnections(units)
+	err := initializeConnections(units)
+	if err != nil {
+		return err
+	}
 
 	timeout := time.Second * time.Duration(timeoutSec)
 	addresses, err := addressRanges(addressRefs)

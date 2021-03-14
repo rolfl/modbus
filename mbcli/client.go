@@ -75,6 +75,7 @@ func client(access string) (modbus.Client, error) {
 			if parts[5] != "dtr" {
 				return nil, fmt.Errorf("DTR must be specified as 'dtr', not %v", parts[5])
 			}
+			dtr = true
 		}
 		unit, err := strconv.Atoi(parts[len(parts)-1])
 		if err != nil {
