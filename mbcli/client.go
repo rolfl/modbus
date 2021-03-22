@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/rolfl/modbus"
 )
@@ -54,8 +55,8 @@ func client(access string) (modbus.Client, error) {
 		return busses[host].GetClient(unit), nil
 	}
 	if parts[0] == "rtu" {
-		if len(parts) < 6 || len(parts) > 7 {
-			return nil, fmt.Errorf("expect exactly 4 parts for TCP client access rtu:device:baud:parity:stop:(dtr:)unit - not: %v", access)
+		if len(parts) < 6 || len(parts) > 8 {
+			return nil, fmt.Errorf("expect 6 to 8 parts for RTU client access rtu:device:baud:parity:stop:(minFrame:)(dtr:)unit - not: %v", access)
 		}
 		device := parts[1]
 		baud, ok := bauds[parts[2]]
@@ -70,20 +71,33 @@ func client(access string) (modbus.Client, error) {
 		if !ok {
 			return nil, fmt.Errorf("illegal stop bits %v", parts[4])
 		}
+		idx := 5
+		last := len(parts) - 1
+
+		minFrame := 0 * time.Millisecond
 		dtr := false
-		if len(parts) == 7 {
-			if parts[5] != "dtr" {
-				return nil, fmt.Errorf("DTR must be specified as 'dtr', not %v", parts[5])
-			}
+		if idx < last && parts[idx] == "dtr" {
 			dtr = true
+			idx++
 		}
-		unit, err := strconv.Atoi(parts[len(parts)-1])
+		if idx < last {
+			mf, err := strconv.Atoi(parts[idx])
+			if err != nil {
+				return nil, err
+			}
+			minFrame = time.Duration(mf) * time.Millisecond
+			idx++
+		}
+		if idx < last {
+			return nil, fmt.Errorf("illegal specification - unable to determine last part: %v", access)
+		}
+		unit, err := strconv.Atoi(parts[idx])
 		if err != nil {
 			return nil, err
 		}
-		key := fmt.Sprintf("%v:%v:%v:%v:%v", device, baud, parity, stop, dtr)
+		key := fmt.Sprintf("%v:%v:%v:%v:%v:%v", device, baud, parity, stop, minFrame, dtr)
 		if _, ok = busses[key]; !ok {
-			mb, err := modbus.NewRTU(device, baud, parity, stop, dtr)
+			mb, err := modbus.NewRTU(device, baud, parity, stop, minFrame, dtr)
 			if err != nil {
 				return nil, err
 			}

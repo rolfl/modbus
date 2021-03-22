@@ -84,8 +84,8 @@ func process(reason string, fn processor) {
 
 func main() {
 	fmt.Printf("Starting Modbus driver\n")
-	// mb, err := modbus.NewTCP("modbus:502")
-	mb, err := modbus.NewTCP("localhost:502")
+	mb, err := modbus.NewTCP("modbus:502")
+	// mb, err := modbus.NewTCP("localhost:502")
 	if err != nil {
 		fmt.Printf("Error opening modbus: %v\n", err)
 		return
