@@ -44,7 +44,7 @@ func process(reason string, fn processor) {
 
 func main() {
 	fmt.Printf("Starting Modbus driver\n")
-	mb, err := modbus.NewRTU("COM5", 9600, 'E', 1, true)
+	mb, err := modbus.NewRTU("COM3", 9600, 'E', 1, 20*time.Millisecond, true)
 	if err != nil {
 		fmt.Printf("Error opening modbus: %v\n", err)
 		return

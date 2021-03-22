@@ -70,6 +70,13 @@ func (c *DiagnosticCommands) Execute(args []string) error {
 				fmt.Printf("Diagnostic counters reset\n")
 			}
 		}
+		if c.Events {
+			if cnt, err := client.CommEventCounter(timeout); err != nil {
+				fmt.Printf("Diagnostic Event Counter: Failed: %v\n", err)
+			} else {
+				fmt.Printf("Diagnostic Event Counter: %v\n", cnt)
+			}
+		}
 	}
 	return nil
 }

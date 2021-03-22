@@ -49,13 +49,14 @@ type rtu struct {
 	toTX chan adu
 	// ID to use for uncorrelated calls
 	txid uint16
+	// wlog chan wirelog
 	// check whether incoming packets are associated with outgoing calls.
 	pending map[byte]uint16
 	diag    *busDiagnosticManager
 }
 
 // NewRTU establishes a connection to a local COM port (windows) or serial device (others)
-func NewRTU(device string, baud int, parity int, stopbits int, dtr bool) (Modbus, error) {
+func NewRTU(device string, baud int, parity int, stopbits int, minFrame time.Duration, dtr bool) (Modbus, error) {
 	options := serial.Config{}
 	options.Name = device
 	options.Baud = baud
@@ -109,24 +110,34 @@ func NewRTU(device string, baud int, parity int, stopbits int, dtr bool) (Modbus
 	wp.toDemux = make(chan adu, 5)
 	wp.pending = make(map[byte]uint16)
 	wp.diag = newBusDiagnosticManager()
+	// wp.wlog = make(chan wirelog, 10)
 
 	// From the Modbus spec, wait 1.5 chars for frame end, and 3.5 for bus idle
-	if baud > 19600 {
-		// wp.pause = 750 * time.Microsecond
-		// wp.idle = 1000 * time.Microsecond
-		wp.pause = 2 * time.Millisecond
-		wp.idle = 4 * time.Millisecond
-	} else {
-		bc := 8 + stopbits
-		if parity != 'N' {
-			bc++
-		}
-		// hc is the time for half a char
-		hc := time.Duration((float64(bc) / float64(baud)) * (1000000.0 * float64(time.Microsecond)))
-		// 3 halfchars is 1.5 chars
-		wp.pause = 3 * hc
-		// add another 4 halfchars to get 3.5 chars.
-		wp.idle = 4 * hc
+	// For baud rates greater than 19200 Bps, fixed values for the 2 timers should be used: it is
+	// recommended to use a value of 750µs for the inter-character time-out (t1.5) and a value of
+	// 1.750ms for inter-frame delay (t3.5).
+	bc := 8 + stopbits
+	if parity != 'N' {
+		bc++
+	}
+	// hc is the time for half a char
+	hc := time.Duration((float64(bc) / float64(baud)) * (1000000.0 * float64(time.Microsecond)))
+	// 3 halfchars is 1.5 chars
+	wp.pause = 3 * hc
+	// add another 4 halfchars to get 3.5 chars.
+	wp.idle = 4 * hc
+
+	if wp.pause < 1*time.Millisecond {
+		wp.pause = 1 * time.Millisecond
+	}
+
+	if wp.idle < 2*time.Millisecond {
+		wp.idle = 2 * time.Millisecond
+	}
+
+	// Set the frame-detect pause to the minimum pause if set.
+	if wp.pause < minFrame {
+		wp.pause = minFrame
 	}
 
 	closer := func() error {
@@ -142,6 +153,8 @@ func NewRTU(device string, baud int, parity int, stopbits int, dtr bool) (Modbus
 	// start a go routine that frames up received messages.
 	go wp.wireFramer()
 
+	// go wp.wireLogger()
+
 	return newModbus(wp.toTX, wp.toDemux, closer, wp.diag), nil
 }
 
@@ -150,7 +163,7 @@ func (rtu *rtu) close() error {
 		return nil
 	}
 	rtu.isopen = false
-	// closing this channel means that anyone readong from the channel is auto-selected in a Select statement
+	// closing this channel means that anyone reading from the channel is auto-selected in a Select statement
 	close(rtu.closed)
 	rtu.serial.Close()
 	return nil
@@ -174,7 +187,7 @@ func (rtu *rtu) wireFramer() {
 				// fmt.Printf("%0x\n", ch)
 			case <-rtu.rxto:
 				// we have a frame.... check it, and distribute it.
-				// fmt.Printf("<<<%v\n", len(data))
+				// fmt.Printf("<<<%v - %v\n", len(data), data)
 				rtu.handleFrame(data)
 				framedone = true
 			}
@@ -225,47 +238,55 @@ func (rtu *rtu) handleFrame(frame rtuFrame) {
 	rtu.toDemux <- a
 }
 
+const (
+	waitframe = iota
+	waitidle
+	isidle
+)
+
 // ticker monitors the state of the wire, and identifies full frames being received, and when it's safe to transmit.
 func (rtu *rtu) ticker() {
 	// initial state is S
-	mode := 'S'
+	mode := waitidle
 	// set up a timer - wait at least a second for the bus to be idle, but stop it immediately.
 	tc := time.NewTimer(time.Second)
 	for {
+		tc.Stop()
 
 		switch mode {
-		case 'P':
+		case waitframe:
+			// reset the timer to wait for the end of the frame
 			tc.Reset(rtu.pause)
-		case 'I':
+		case waitidle:
+			// after getting a frame, we wait for an idle period too.
 			tc.Reset(rtu.idle)
-		case 'O':
-			tc.Stop()
-		case 'S':
-			// swap start state with its extended timer to be just I state.
-			mode = 'I'
+		case isidle:
+			// we can stop the timer - we're not waiting for anything.
 		}
 
 		select {
 		case <-rtu.closed:
 			return
 		case <-rtu.rxtoc:
-			mode = 'P'
-			tc.Stop()
+			// rxtoc is pinged when bytes are received.
+			mode = waitframe
 		case <-tc.C:
-			if mode == 'I' {
+			if mode == waitidle {
 				// We have a prolonged period where the bus is idle after bus activity
 				// we can now write to the bus if we need to (3.5 char period)
 				//fmt.Println("Tock")
 				rtu.txready <- true
 				// set the mode to Off.
-				mode = 'O'
+				mode = isidle
+				// fmt.Printf("Long Idle marker\n")
 			}
-			if mode == 'P' {
+			if mode == waitframe {
 				// We have received a short idle period 1.5 chars, frame is done.
 				//fmt.Println("Tick")
 				rtu.rxto <- true
 				// set the mode to wait for idle.
-				mode = 'I'
+				mode = waitidle
+				// fmt.Printf("Short Idle marker\n")
 			}
 		}
 	}
@@ -275,10 +296,17 @@ func (rtu *rtu) ticker() {
 // It manages the TX idle timer as well, so that we cannot send data until the bus is idle.
 func (rtu *rtu) wireReader() {
 	alive := true
+	buffer := make([]byte, 256)
 	for alive {
-		buffer := make([]byte, 256)
 		n, err := rtu.serial.Read(buffer)
+		if err != nil {
+			fmt.Printf("Error reading from serial line %s: %s\n", rtu.name, err)
+			n = 0
+		}
 		if n != 0 {
+			// cp := make([]byte, n)
+			// copy(cp, buffer)
+			// rtu.wlog <- wirelog{time.Now(), cp}
 			// reset the clock timeout.
 			rtu.rxtoc <- true
 			// send the chars to the channel
@@ -296,9 +324,6 @@ func (rtu *rtu) wireReader() {
 				// do nothing.
 			}
 		}
-		if err != nil {
-			fmt.Printf("Error reading from serial line %s: %s\n", rtu.name, err)
-		}
 		// Some channel magic, if the rtu.closed channel is closed, it's automatically selected.
 		select {
 		case <-rtu.closed:
@@ -309,6 +334,15 @@ func (rtu *rtu) wireReader() {
 	}
 	fmt.Printf("Terminating serial line reader %s: closed\n", rtu.name)
 }
+
+// func (rtu *rtu) wireLogger() {
+// 	prev := time.Now()
+// 	for l := range rtu.wlog {
+// 		dur := l.at.Sub(prev)
+// 		fmt.Printf("Received at %v (delay %v): %v\n", l.at, dur, l.bytes)
+// 		prev = l.at
+// 	}
+// }
 
 // wireWriter takes frames that are ready to send, waits for an idle period on the wire, and transmits it.
 func (rtu *rtu) wireWriter() {
